@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-03-06T17:17:23.602374Z",
+  "parameters": {
+    "n_neurons": 50,
+    "n_timesteps": 1000,
+    "window_size": 20,
+    "n_clusters": 4
+  },
+  "results": {
+    "n_time_windows": 980,
+    "feature_dimensions": 50,
+    "silhouette_score": 0.0685,
+    "pca_dims_for_90pct_variance": 27,
+    "cluster_sizes": {
+      "0": 261,
+      "1": 331,
+      "2": 253,
+      "3": 135
+    }
+  }
+}
