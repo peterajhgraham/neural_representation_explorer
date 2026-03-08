@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the full neural representation explorer pipeline and save results."""
+"""Neural Representation Explorer — full analysis pipeline."""
 
 import os
 import sys
@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,172 +21,325 @@ from src.clustering import cluster_states
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 
+# ── Color palette ──────────────────────────────────────────────────────────────
+BG             = "#0d1117"
+SURFACE        = "#161b22"
+BORDER         = "#30363d"
+TEXT           = "#e6edf3"
+MUTED          = "#8b949e"
+CLUSTER_COLORS = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe"]
+STATE_NAMES    = ["Rest", "Explore", "Active", "Groom"]
+
+
+def _apply_theme():
+    plt.rcParams.update({
+        "figure.facecolor":  BG,
+        "axes.facecolor":    SURFACE,
+        "axes.edgecolor":    BORDER,
+        "axes.labelcolor":   TEXT,
+        "axes.titlecolor":   TEXT,
+        "axes.titlepad":     10,
+        "xtick.color":       MUTED,
+        "ytick.color":       MUTED,
+        "text.color":        TEXT,
+        "grid.color":        BORDER,
+        "grid.linewidth":    0.6,
+        "legend.facecolor":  SURFACE,
+        "legend.edgecolor":  BORDER,
+        "font.family":       "monospace",
+        "font.size":         10,
+    })
+
 
 def run():
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    np.random.seed(42)
+    _apply_theme()
 
-    # --- 1. Simulate spikes ---
-    n_neurons, n_timesteps = 50, 1000
-    spikes = simulate_spikes(n_neurons=n_neurons, n_timesteps=n_timesteps)
+    # ── 1. Simulate structured neural population ───────────────────────────────
+    spikes, state_labels = simulate_spikes(n_neurons=60, n_timesteps=2000, n_states=4)
+    n_neurons, n_timesteps = spikes.shape
 
-    # --- 2. Compute features ---
-    window = 20
-    features = compute_firing_rates(spikes, window=window)
+    # ── 2. Gaussian-smoothed firing rates (vectorized, no Python loop) ─────────
+    features = compute_firing_rates(spikes, sigma=10)
 
-    # --- 3. Dimensionality reduction ---
-    pca_embedding = compute_pca(features, n_components=2)
-    umap_embedding = compute_umap(features)
+    # ── 3. Dimensionality reduction ────────────────────────────────────────────
+    pca_emb  = compute_pca(features, n_components=2)
+    umap_emb = compute_umap(features)
 
-    # --- 4. Clustering ---
-    k = 4
-    labels = cluster_states(features, k=k)
+    # ── 4. Cluster neural population states ───────────────────────────────────
+    labels = cluster_states(features, k=4)
 
-    # --- 5. Generate figures ---
-    _plot_manifolds(pca_embedding, umap_embedding, labels)
-    _plot_spike_raster(spikes)
-    _plot_firing_rate_heatmap(features)
-    _plot_cluster_distribution(labels, k)
+    # ── 5. Visualize ──────────────────────────────────────────────────────────
+    _plot_manifolds(pca_emb, umap_emb, labels)
+    _plot_trajectory(umap_emb, state_labels)
+    _plot_spike_raster(spikes, state_labels)
+    _plot_firing_rate_heatmap(features, state_labels)
+    _plot_state_transitions(state_labels, n_states=4)
     _plot_pca_variance(features)
 
-    # --- 6. Write summary ---
+    # ── 6. Summary ────────────────────────────────────────────────────────────
     summary = _build_summary(
-        n_neurons=n_neurons,
-        n_timesteps=n_timesteps,
-        window=window,
-        k=k,
-        features=features,
-        labels=labels,
-        pca_embedding=pca_embedding,
-        umap_embedding=umap_embedding,
+        n_neurons=n_neurons, n_timesteps=n_timesteps,
+        features=features, labels=labels, state_labels=state_labels,
     )
     with open(os.path.join(RESULTS_DIR, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
 
     _write_results_markdown(summary)
+    print("Pipeline complete. Results in results/")
 
-    print("Pipeline complete. Results written to results/")
 
+# ── Plotting ──────────────────────────────────────────────────────────────────
 
-# ---------- plotting helpers ----------
+def _state_legend_handles():
+    from matplotlib.patches import Patch
+    return [Patch(color=c, label=n) for c, n in zip(CLUSTER_COLORS, STATE_NAMES)]
+
 
 def _plot_manifolds(pca_emb, umap_emb, labels):
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), facecolor=BG)
+    fig.suptitle("Neural Population Manifolds", color=TEXT, fontsize=13)
 
-    sc0 = axes[0].scatter(
-        pca_emb[:, 0], pca_emb[:, 1],
-        c=labels, cmap="viridis", s=12, alpha=0.8, edgecolors="none",
-    )
-    axes[0].set_title("PCA — Neural Population States")
-    axes[0].set_xlabel("PC 1")
-    axes[0].set_ylabel("PC 2")
-    plt.colorbar(sc0, ax=axes[0], label="Cluster")
+    for ax, emb, title, xl, yl in [
+        (axes[0], pca_emb,  "PCA",  "PC 1",   "PC 2"),
+        (axes[1], umap_emb, "UMAP", "UMAP 1", "UMAP 2"),
+    ]:
+        for k, (color, name) in enumerate(zip(CLUSTER_COLORS, STATE_NAMES)):
+            mask = labels == k
+            ax.scatter(emb[mask, 0], emb[mask, 1],
+                       c=color, s=8, alpha=0.75, edgecolors="none", label=name)
+        ax.set_title(f"{title}  —  colored by K-Means cluster")
+        ax.set_xlabel(xl)
+        ax.set_ylabel(yl)
+        ax.legend(handles=_state_legend_handles(), markerscale=2,
+                  fontsize=8, loc="best")
+        ax.grid(True, alpha=0.3)
 
-    sc1 = axes[1].scatter(
+    fig.tight_layout()
+    fig.savefig(os.path.join(RESULTS_DIR, "manifolds.png"),
+                dpi=150, bbox_inches="tight", facecolor=BG)
+    plt.close(fig)
+
+
+def _plot_trajectory(umap_emb, state_labels):
+    """UMAP trajectory colored two ways: by time and by ground-truth state."""
+    n = len(umap_emb)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), facecolor=BG)
+    fig.suptitle("Neural Trajectory Through State Space", color=TEXT, fontsize=13)
+
+    # Left: color by time — shows the path the population traces
+    sc = axes[0].scatter(
         umap_emb[:, 0], umap_emb[:, 1],
-        c=labels, cmap="viridis", s=12, alpha=0.8, edgecolors="none",
+        c=np.arange(n), cmap="plasma", s=6, alpha=0.7, edgecolors="none",
     )
-    axes[1].set_title("UMAP — Neural Population States")
+    axes[0].set_title("Colored by time  (plasma = early → late)")
+    axes[0].set_xlabel("UMAP 1")
+    axes[0].set_ylabel("UMAP 2")
+    axes[0].grid(True, alpha=0.3)
+    cb = fig.colorbar(sc, ax=axes[0], label="Timestep")
+    cb.ax.yaxis.label.set_color(TEXT)
+    cb.ax.tick_params(colors=MUTED)
+
+    # Right: color by ground-truth behavioral state
+    cmap_states = mcolors.ListedColormap(CLUSTER_COLORS)
+    axes[1].scatter(
+        umap_emb[:, 0], umap_emb[:, 1],
+        c=state_labels, cmap=cmap_states, vmin=0, vmax=3,
+        s=6, alpha=0.7, edgecolors="none",
+    )
+    axes[1].set_title("Colored by ground-truth behavioral state")
     axes[1].set_xlabel("UMAP 1")
     axes[1].set_ylabel("UMAP 2")
-    plt.colorbar(sc1, ax=axes[1], label="Cluster")
+    axes[1].grid(True, alpha=0.3)
+    axes[1].legend(handles=_state_legend_handles(), fontsize=8, loc="best")
 
-    plt.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "manifolds.png"), dpi=150, bbox_inches="tight")
+    fig.tight_layout()
+    fig.savefig(os.path.join(RESULTS_DIR, "trajectory.png"),
+                dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
 
 
-def _plot_spike_raster(spikes, max_neurons=30, max_timesteps=300):
-    fig, ax = plt.subplots(figsize=(12, 5))
-    subset = spikes[:max_neurons, :max_timesteps]
-    for neuron_idx in range(subset.shape[0]):
-        spike_times = np.where(subset[neuron_idx] > 0)[0]
-        ax.scatter(spike_times, np.full_like(spike_times, neuron_idx),
-                   s=1, color="black")
-    ax.set_title("Spike Raster (first 30 neurons, first 300 time steps)")
-    ax.set_xlabel("Time step")
-    ax.set_ylabel("Neuron")
-    ax.set_ylim(-1, max_neurons)
-    ax.invert_yaxis()
-    plt.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "spike_raster.png"), dpi=150, bbox_inches="tight")
+def _plot_spike_raster(spikes, state_labels, max_neurons=40, max_t=600):
+    fig, axes = plt.subplots(
+        2, 1, figsize=(14, 7), facecolor=BG,
+        gridspec_kw={"height_ratios": [1, 8], "hspace": 0.04},
+    )
+    fig.suptitle("Spike Raster", color=TEXT, fontsize=13)
+
+    # State timeline strip
+    cmap_states = mcolors.ListedColormap(CLUSTER_COLORS)
+    axes[0].imshow(
+        state_labels[:max_t][None, :], aspect="auto",
+        cmap=cmap_states, vmin=0, vmax=3,
+        extent=[0, max_t, 0, 1], interpolation="nearest",
+    )
+    axes[0].set_yticks([])
+    axes[0].set_xticks([])
+    axes[0].set_ylabel("State", fontsize=8)
+    # mini legend on the state strip
+    for i, (c, n) in enumerate(zip(CLUSTER_COLORS, STATE_NAMES)):
+        axes[0].text(max_t * (i / len(STATE_NAMES) + 0.02), 0.5, n,
+                     color=BG, fontsize=7, va="center", fontweight="bold")
+
+    # Spike raster
+    subset = spikes[:max_neurons, :max_t]
+    for nidx in range(max_neurons):
+        spike_times = np.where(subset[nidx] > 0)[0]
+        axes[1].scatter(spike_times, np.full_like(spike_times, nidx),
+                        s=1.5, color="#58a6ff", alpha=0.55)
+    axes[1].set_xlim(0, max_t)
+    axes[1].set_ylim(-1, max_neurons)
+    axes[1].invert_yaxis()
+    axes[1].set_xlabel("Timestep")
+    axes[1].set_ylabel("Neuron index")
+    axes[1].grid(True, alpha=0.2)
+
+    fig.savefig(os.path.join(RESULTS_DIR, "spike_raster.png"),
+                dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
 
 
-def _plot_firing_rate_heatmap(features):
-    fig, ax = plt.subplots(figsize=(12, 5))
-    im = ax.imshow(features.T, aspect="auto", cmap="hot", interpolation="nearest")
-    ax.set_title("Firing Rate Heatmap (neurons × time windows)")
-    ax.set_xlabel("Time window")
-    ax.set_ylabel("Neuron")
-    plt.colorbar(im, ax=ax, label="Firing rate")
-    plt.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "firing_rates.png"), dpi=150, bbox_inches="tight")
+def _plot_firing_rate_heatmap(features, state_labels):
+    n_t = features.shape[0]
+    fig, axes = plt.subplots(
+        2, 1, figsize=(14, 7), facecolor=BG,
+        gridspec_kw={"height_ratios": [1, 8], "hspace": 0.04},
+    )
+    fig.suptitle("Population Firing Rates", color=TEXT, fontsize=13)
+
+    # State timeline strip
+    cmap_states = mcolors.ListedColormap(CLUSTER_COLORS)
+    axes[0].imshow(
+        state_labels[:n_t][None, :], aspect="auto",
+        cmap=cmap_states, vmin=0, vmax=3,
+        extent=[0, n_t, 0, 1], interpolation="nearest",
+    )
+    axes[0].set_yticks([])
+    axes[0].set_xticks([])
+    axes[0].set_ylabel("State", fontsize=8)
+
+    # Firing rate heatmap
+    im = axes[1].imshow(
+        features.T, aspect="auto", cmap="inferno",
+        interpolation="nearest", origin="lower",
+    )
+    axes[1].set_xlabel("Timestep")
+    axes[1].set_ylabel("Neuron index")
+    cb = fig.colorbar(im, ax=axes[1], label="Smoothed firing rate")
+    cb.ax.yaxis.label.set_color(TEXT)
+    cb.ax.tick_params(colors=MUTED)
+
+    fig.savefig(os.path.join(RESULTS_DIR, "firing_rates.png"),
+                dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
 
 
-def _plot_cluster_distribution(labels, k):
-    fig, ax = plt.subplots(figsize=(6, 4))
-    counts = [np.sum(labels == i) for i in range(k)]
-    colors = plt.cm.viridis(np.linspace(0.15, 0.85, k))
-    ax.bar(range(k), counts, color=colors, edgecolor="white", linewidth=0.8)
-    ax.set_title("Cluster Size Distribution")
-    ax.set_xlabel("Cluster")
-    ax.set_ylabel("Number of time windows")
-    ax.set_xticks(range(k))
-    plt.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "cluster_distribution.png"), dpi=150, bbox_inches="tight")
+def _plot_state_transitions(state_labels, n_states=4):
+    """Empirical Markov transition matrix — how often does each state follow each other?"""
+    T = np.zeros((n_states, n_states), dtype=int)
+    for a, b in zip(state_labels[:-1], state_labels[1:]):
+        T[a, b] += 1
+
+    row_sums = T.sum(axis=1, keepdims=True).clip(min=1)
+    T_prob = T / row_sums
+
+    fig, ax = plt.subplots(figsize=(6, 5), facecolor=BG)
+    im = ax.imshow(T_prob, cmap="magma", vmin=0, vmax=1)
+    ax.set_xticks(range(n_states))
+    ax.set_yticks(range(n_states))
+    ax.set_xticklabels(STATE_NAMES)
+    ax.set_yticklabels(STATE_NAMES)
+    ax.set_xlabel("Next state")
+    ax.set_ylabel("Current state")
+    ax.set_title("State Transition Probabilities")
+    for i in range(n_states):
+        for j in range(n_states):
+            ax.text(j, i, f"{T_prob[i, j]:.2f}",
+                    ha="center", va="center", color=TEXT, fontsize=11)
+    cb = fig.colorbar(im, ax=ax, label="Probability")
+    cb.ax.yaxis.label.set_color(TEXT)
+    cb.ax.tick_params(colors=MUTED)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(RESULTS_DIR, "transitions.png"),
+                dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
 
 
 def _plot_pca_variance(features):
     from sklearn.decomposition import PCA
     pca_full = PCA().fit(features)
-    explained = np.cumsum(pca_full.explained_variance_ratio_) * 100
+    ind_var = pca_full.explained_variance_ratio_ * 100
+    cum_var = np.cumsum(ind_var)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    n_show = min(20, len(explained))
-    ax.bar(range(1, n_show + 1), pca_full.explained_variance_ratio_[:n_show] * 100,
-           color="steelblue", alpha=0.8, label="Individual")
-    ax.plot(range(1, n_show + 1), explained[:n_show],
-            "o-", color="darkorange", markersize=5, label="Cumulative")
+    n_show = min(20, len(ind_var))
+    x = np.arange(1, n_show + 1)
+
+    fig, ax = plt.subplots(figsize=(8, 4), facecolor=BG)
+    ax.bar(x, ind_var[:n_show], color="#4ecdc4", alpha=0.85, label="Individual")
+
+    ax2 = ax.twinx()
+    ax2.plot(x, cum_var[:n_show], "o-", color="#ffd93d",
+             markersize=5, linewidth=2, label="Cumulative")
+    ax2.set_ylim(0, 105)
+    ax2.set_ylabel("Cumulative variance (%)")
+    ax2.tick_params(colors=MUTED)
+    ax2.yaxis.label.set_color(TEXT)
+    for spine in ax2.spines.values():
+        spine.set_edgecolor(BORDER)
+
     ax.set_title("PCA Explained Variance")
     ax.set_xlabel("Principal Component")
-    ax.set_ylabel("Variance Explained (%)")
-    ax.legend()
-    plt.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "pca_variance.png"), dpi=150, bbox_inches="tight")
+    ax.set_ylabel("Individual variance (%)")
+    ax.grid(True, alpha=0.3)
+
+    lines1, labs1 = ax.get_legend_handles_labels()
+    lines2, labs2 = ax2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labs1 + labs2, fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(RESULTS_DIR, "pca_variance.png"),
+                dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
 
 
-# ---------- summary helpers ----------
+# ── Summary ───────────────────────────────────────────────────────────────────
 
-def _build_summary(*, n_neurons, n_timesteps, window, k, features, labels,
-                   pca_embedding, umap_embedding):
+def _build_summary(*, n_neurons, n_timesteps, features, labels, state_labels):
     from sklearn.metrics import silhouette_score
+    from sklearn.decomposition import PCA
+
     sil = float(silhouette_score(features, labels))
 
-    from sklearn.decomposition import PCA
     pca_full = PCA().fit(features)
-    cumvar = np.cumsum(pca_full.explained_variance_ratio_)
-    dims_90 = int(np.searchsorted(cumvar, 0.90) + 1)
+    dims_90  = int(np.searchsorted(np.cumsum(pca_full.explained_variance_ratio_), 0.90) + 1)
 
+    k = int(labels.max()) + 1
     cluster_sizes = {int(i): int(np.sum(labels == i)) for i in range(k)}
+
+    # Dwell-time statistics
+    dwells, t, cur = [], 0, state_labels[0]
+    for i, s in enumerate(state_labels):
+        if s != cur:
+            dwells.append(i - t)
+            t, cur = i, s
+    dwells.append(len(state_labels) - t)
 
     return {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "parameters": {
-            "n_neurons": n_neurons,
-            "n_timesteps": n_timesteps,
-            "window_size": window,
-            "n_clusters": k,
+            "n_neurons":        n_neurons,
+            "n_timesteps":      n_timesteps,
+            "smoothing_sigma":  10,
+            "n_clusters":       k,
         },
         "results": {
-            "n_time_windows": int(features.shape[0]),
-            "feature_dimensions": int(features.shape[1]),
-            "silhouette_score": round(sil, 4),
+            "n_timepoints":              int(features.shape[0]),
+            "feature_dimensions":        int(features.shape[1]),
+            "silhouette_score":          round(sil, 4),
             "pca_dims_for_90pct_variance": dims_90,
-            "cluster_sizes": cluster_sizes,
+            "cluster_sizes":             cluster_sizes,
+            "mean_state_dwell_timesteps": round(float(np.mean(dwells)), 1),
         },
     }
 
@@ -194,55 +348,60 @@ def _write_results_markdown(summary):
     p = summary["parameters"]
     r = summary["results"]
 
-    md = f"""# Results
+    rows = "".join(
+        f"| {cid} | {STATE_NAMES[cid]} | {size} |\n"
+        for cid, size in r["cluster_sizes"].items()
+    )
 
-> Auto-generated by `run_pipeline.py` on {summary['timestamp'][:10]}
+    md = f"""# Pipeline Results
+
+> Auto-generated on {summary['timestamp'][:10]}
 
 ## Parameters
 
 | Parameter | Value |
 |-----------|-------|
 | Neurons | {p['n_neurons']} |
-| Time steps | {p['n_timesteps']} |
-| Window size | {p['window_size']} |
+| Timesteps | {p['n_timesteps']} |
+| Smoothing σ | {p['smoothing_sigma']} |
 | Clusters (k) | {p['n_clusters']} |
 
-## Key Metrics
+## Metrics
 
 | Metric | Value |
 |--------|-------|
-| Time windows | {r['n_time_windows']} |
-| Feature dimensions | {r['feature_dimensions']} |
-| Silhouette score | {r['silhouette_score']} |
-| PCA dims for 90% variance | {r['pca_dims_for_90pct_variance']} |
+| Silhouette score | **{r['silhouette_score']}** |
+| PCA dims → 90% variance | {r['pca_dims_for_90pct_variance']} |
+| Mean state dwell | {r['mean_state_dwell_timesteps']} timesteps |
 
 ## Cluster Distribution
 
-| Cluster | Size |
-|---------|------|
-""" + "".join(
-        f"| {cid} | {size} |\n"
-        for cid, size in r["cluster_sizes"].items()
-    ) + f"""
+| Cluster | State | Size |
+|---------|-------|------|
+{rows}
+## Neural Manifolds
+
+![Manifolds](manifolds.png)
+
+## Neural Trajectory
+
+![Trajectory](trajectory.png)
+
 ## Spike Raster
 
 ![Spike Raster](spike_raster.png)
 
-## Firing Rate Heatmap
+## Population Firing Rates
 
 ![Firing Rates](firing_rates.png)
+
+## State Transition Matrix
+
+![Transitions](transitions.png)
 
 ## PCA Explained Variance
 
 ![PCA Variance](pca_variance.png)
-
-## Neural Manifolds (PCA & UMAP)
-
-![Manifolds](manifolds.png)
-
-## Cluster Size Distribution
-
-![Cluster Distribution](cluster_distribution.png)
 """
     with open(os.path.join(RESULTS_DIR, "RESULTS.md"), "w") as f:
         f.write(md)
