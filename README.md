@@ -130,6 +130,14 @@ python run_pipeline.py
 # → results/ now contains all figures and summary.json
 ```
 
+### Real Data
+
+```bash
+python run_pipeline.py --mode real
+```
+
+Pulls a public extracellular recording from DANDI Archive (dandiset 000003), bins the spike times into a `(n_neurons, n_timesteps)` array, and runs the identical analysis pipeline — no other changes required.
+
 Or explore interactively:
 
 ```bash

@@ -3,3 +3,7 @@ pandas
 scikit-learn
 matplotlib
 umap-learn
+dandi
+pynwb
+remfile
+h5py

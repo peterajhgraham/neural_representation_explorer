@@ -51,12 +51,16 @@ def _apply_theme():
     })
 
 
-def run():
+def run(mode: str = "sim"):
     os.makedirs(RESULTS_DIR, exist_ok=True)
     _apply_theme()
 
-    # ── 1. Simulate structured neural population ───────────────────────────────
-    spikes, state_labels = simulate_spikes(n_neurons=60, n_timesteps=2000, n_states=4)
+    # ── 1. Spike data source ───────────────────────────────────────────────────
+    if mode == "real":
+        from loaders.nwb_loader import load_nwb_spikes
+        spikes, state_labels = load_nwb_spikes()
+    else:
+        spikes, state_labels = simulate_spikes(n_neurons=60, n_timesteps=2000, n_states=4)
     n_neurons, n_timesteps = spikes.shape
 
     # ── 2. Gaussian-smoothed firing rates (vectorized, no Python loop) ─────────
@@ -408,4 +412,13 @@ def _write_results_markdown(summary):
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser(description="Neural Representation Explorer")
+    parser.add_argument(
+        "--mode",
+        choices=["sim", "real"],
+        default="sim",
+        help="'sim' uses simulated spikes (default); 'real' streams a public NWB file from DANDI",
+    )
+    args = parser.parse_args()
+    run(mode=args.mode)
