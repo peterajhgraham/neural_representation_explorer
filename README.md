@@ -1,6 +1,6 @@
 # Neural Representation Explorer
 
-This tool takes simulated brain activity, compresses it down to two dimensions, and reveals that neurons naturally organize into distinct behavioral states — rest, exploration, active movement, and grooming. It's interesting because it shows that complex, high-dimensional neural data has hidden low-dimensional structure that's recoverable with standard machine learning techniques.
+This tool takes simulated brain activity, compresses it down to two dimensions, and reveals that neurons naturally organize into distinct behavioral states — rest, exploration, active movement, and grooming. It shows that complex, high-dimensional neural data has hidden low-dimensional structure that's recoverable with standard machine learning techniques.
 
 > [!NOTE]
 > The pipeline auto-runs on every push via **GitHub Actions** and commits the refreshed figures back to this repo — so the images below always reflect the latest code.
