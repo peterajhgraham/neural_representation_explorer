@@ -101,7 +101,7 @@ def _state_legend_handles():
 
 
 def _plot_manifolds(pca_emb, umap_emb, labels):
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), facecolor=BG)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), facecolor=BG)
     fig.suptitle("Neural Population Manifolds", color=TEXT, fontsize=13)
 
     for ax, emb, title, xl, yl in [
@@ -110,16 +110,23 @@ def _plot_manifolds(pca_emb, umap_emb, labels):
     ]:
         for k, (color, name) in enumerate(zip(CLUSTER_COLORS, STATE_NAMES)):
             mask = labels == k
+            # glow pass underneath
             ax.scatter(emb[mask, 0], emb[mask, 1],
-                       c=color, s=8, alpha=0.75, edgecolors="none", label=name)
+                       c=color, s=60, alpha=0.08, edgecolors="none")
+            # main scatter
+            ax.scatter(emb[mask, 0], emb[mask, 1],
+                       c=color, s=14, alpha=0.85, edgecolors="none")
+            # centroid label
+            cx, cy = emb[mask, 0].mean(), emb[mask, 1].mean()
+            ax.text(cx, cy, name, color=color, fontsize=9, fontweight="bold",
+                    ha="center", va="bottom",
+                    transform=ax.transData)
         ax.set_title(f"{title}  —  colored by K-Means cluster")
         ax.set_xlabel(xl)
         ax.set_ylabel(yl)
-        ax.legend(handles=_state_legend_handles(), markerscale=2,
-                  fontsize=8, loc="best")
         ax.grid(True, alpha=0.3)
 
-    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.05)
     fig.savefig(os.path.join(RESULTS_DIR, "manifolds.png"),
                 dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
